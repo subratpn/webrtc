@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC Sender</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      padding: 0;
+      box-sizing: border-box;
+      text-align: center;
+    }
+
+    h1 {
+      color: #333;
+    }
+
+    button {
+      padding: 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    #localVideoContainer {
+      max-width: 640px;
+      margin: 20px auto;
+      display: block;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    #localVideo {
+      width: 100%;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>WebRTC Sender</h1>
+  <div id="localVideoContainer">
+    <video id="localVideo" autoplay playsinline></video>
+  </div>
+  <button onclick="startVideo()">Start Video</button>
+
+  <script>
+    // Initialize socket in the global scope
+    const socket = io('ws://localhost:3000');
+  
+    let localStream;
+    let peerConnection;
+  
+    function startVideo() {
+      try {
+        const constraints = { video: true, audio: false };
+        navigator.mediaDevices.getUserMedia(constraints)
+          .then((stream) => {
+            const localVideo = document.getElementById('localVideo');
+            // Attach the stream to the video element
+            localVideo.srcObject = stream;
+            localStream = stream;
+            createPeerConnection();
+          });
+      } catch (error) {
+        console.error("Error accessing webcam:", error);
+      }
+    }
+  
+    function createPeerConnection() {
+      const configuration = { iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }, {
+            urls: 'turn:relay1.expressturn.com:3478',
+            username: 'efXDRCOSWCI8B9P3C7',
+            credential: 'UbWdFXE3j5XD5maP',
+            credentialType: 'password',
+          }] };
+      peerConnection = new RTCPeerConnection(configuration);
+  
+      console.log('Local Stream Tracks:', localStream.getTracks()[0]);
+      peerConnection.addTrack(localStream.getTracks()[0], localStream);
+      console.log('Peer Senders:', peerConnection.getSenders());
+
+      peerConnection.createOffer()
+        .then(offer => peerConnection.setLocalDescription(offer))
+        .then(() => {
+          // Send the offer to the other peer via signaling server
+          socket.emit('offer', peerConnection.localDescription);
+        })
+        .catch(error => console.error('Error creating offer:', error));
+  
+      // Set up event handlers for ICE candidates
+      peerConnection.onicecandidate = (event) => {
+        console.log("ICE candidate event:", JSON.stringify(event));
+        if (event.candidate) {
+          // Send ICE candidate to the other peer via signaling server
+          socket.emit('ice-candidate', event.candidate);
+        }
+      };
+
+      // Set up event handler for receiving the answer
+      socket.on('answer', (answer) => {
+        console.log('Got the Answer: ' + JSON.stringify(answer));
+        const remoteAnswer = new RTCSessionDescription(answer);
+        peerConnection.setRemoteDescription(remoteAnswer)
+          .catch(error => console.error('Error setting remote description:', error));
+      });
+
+      socket.on('ice-candidate', (candidate) => {
+        console.log('Got the ICE-Candidate at Capture:', JSON.stringify(candidate));
+        // Receive ICE candidate from the other peer and add it to the peer connection
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      });
+    }
+  </script>
+</body>
+</html>

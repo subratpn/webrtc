@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC Receiver</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      padding: 0;
+      box-sizing: border-box;
+      text-align: center;
+    }
+
+    h1 {
+      color: #333;
+    }
+
+    #remoteVideo {
+      width: 100%;
+      max-width: 640px;
+      margin: 20px auto;
+      display: block;
+    }
+
+    /* Custom Loader Styles */
+    #loader {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(255, 255, 255, 0.8);
+      z-index: 9999;
+    }
+
+    #loader .spinner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+    }
+
+    #remoteVideoContainer {
+      max-width: 640px;
+      margin: 20px auto;
+      display: block;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    #remoteVideo {
+      width: 100%;
+      display: block;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <h1>WebRTC Receiver</h1>
+  <div id="loader">
+    <div class="spinner"></div>
+  </div>
+  <div id="remoteVideoContainer">
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+  <script>
+    const socket = io('ws://192.168.0.107:3000');
+    const configuration = {
+      iceServers: [
+        { urls: ['stun:stun.l.google.com:19302'] },
+        {
+          urls: 'turn:relay1.expressturn.com:3478',
+          username: 'efXDRCOSWCI8B9P3C7',
+          credential: 'UbWdFXE3j5XD5maP',
+          credentialType: 'password',
+        }
+      ]
+    };
+    const peerConnection = new RTCPeerConnection(configuration);
+
+    let loaderTimeout;
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        // Send ICE candidate to the other peer via signaling server
+        socket.emit('ice-candidate', event.candidate);
+      }
+    };
+
+    socket.on('ice-candidate', (candidate) => {
+      console.log('Got the ICE-Candidate: ' + JSON.stringify(candidate));
+      // Receive ICE candidate from the other peer and add it to the peer connection
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    socket.on('offer', async (offer) => {
+      console.log('Got the offer: ' + JSON.stringify(offer));
+      // Receive offer from the other peer and set it as a remote description
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+      // Create answer and set it as the local description
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      // Send answer to the other peer via signaling server
+      socket.emit('answer', answer);
+    });
+
+    peerConnection.ontrack = (event) => {
+      // Show custom loader when ontrack event is triggered
+      const loader = document.getElementById('loader');
+      loader.style.display = 'block';
+
+      // Set a timeout to stop the loader and play the video after 5 seconds
+      loaderTimeout = setTimeout(() => {
+        loader.style.display = 'none';
+        rtVideo.play();
+      }, 5000);
+
+      const remoteTracks = peerConnection.getReceivers().map((r) => r.track);
+      const remoteStream = new MediaStream(remoteTracks);
+      console.log('Remote Stream:', remoteStream);
+      const rtVideo = document.getElementById('remoteVideo');
+      rtVideo.srcObject = remoteStream;
+    };
+
+    peerConnection.addEventListener('connectionstatechange', () => {
+      console.log('Connection state changed:', peerConnection.connectionState);
+    });
+
+    // Clear the loader timeout if the video is played before the timeout
+    rtVideo.addEventListener('play', () => {
+      clearTimeout(loaderTimeout);
+    });
+  </script>
+</body>
+</html>
